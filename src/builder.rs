@@ -1,3 +1,4 @@
+use crate::distributions::LogLikelihood;
 use crate::metropolis::{
     Contents, DepLeaf, DepPair, DepTree, Dist, Graph, NodeID, NodeRef, Stats, bern_s, dirac_s,
     mcmc_step, uniform_s, with_node_none, with_node_tree,
@@ -138,21 +139,31 @@ impl<A: Clone + 'static, B: Clone + 'static> Tree<(A, B)> for Pair<A, B> {
     }
 }
 
-struct Model<A> {
+struct Sampler<A> {
     result: NodeRef<A>,
     g: Pcg64,
     stats: Stats,
     contents: Contents,
     graph: Graph,
 }
-impl<A: Clone + 'static> Model<A> {
+impl<A: Clone + 'static> Sampler<A> {
     fn new(node: Leaf<A>, seed: u64) -> Self {
         let mut g = Pcg64::seed_from_u64(seed);
         let mut stats = Stats::new();
         let mut contents = Contents::new();
         let mut graph = Graph::new();
         let mut built = HashMap::new();
-        let result = node.build(&mut built, &mut g, &mut stats, &mut contents, &mut graph);
+        let result = loop {
+            let r = node.build(&mut built, &mut g, &mut stats, &mut contents, &mut graph);
+            let prob = stats.ll_total;
+            if prob > LogLikelihood::NEG_INFINITY {
+                break r;
+            }
+            stats = Stats::new();
+            contents = Contents::new();
+            graph = Graph::new();
+            built.clear();
+        };
         Self {
             result,
             g,
@@ -162,7 +173,7 @@ impl<A: Clone + 'static> Model<A> {
         }
     }
 }
-impl<A: Clone + 'static> Iterator for Model<A> {
+impl<A: Clone + 'static> Iterator for Sampler<A> {
     type Item = A;
     fn next(&mut self) -> Option<Self::Item> {
         let value = mcmc_step(
@@ -204,17 +215,20 @@ mod test {
     use super::*;
     #[test]
     fn test() {
+        let total = 2000;
+        let prob = 0.25;
+
         let c = uniform(val(0.0), val(1.0));
         let d = flip(val(0.5));
         let e = flip(c);
         let result = d & e;
-        let model = Model::new(result, 1337);
-        let samples = model
-            .skip(2000)
-            .take(2000)
+        let sampler = Sampler::new(result, 1337);
+        let samples = sampler
+            .skip(total)
+            .take(total)
             .map(|a| if a { 1 } else { 0 })
             .sum::<i32>();
-        let delta = (samples - 500).abs() as f64 / 2000.0;
+        let delta = (samples as f64 - total as f64 * prob).abs() / 2000.0;
         assert!(delta < 0.05, "delta: {}, samples: {}", delta, samples);
     }
 }

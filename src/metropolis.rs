@@ -178,7 +178,7 @@ type RefSet = Set64<NodeID>;
 pub struct Stats {
     now: u64,
     delayed_updates: RefSet,
-    ll_total: LogLikelihood,
+    pub(crate) ll_total: LogLikelihood,
     change_num: u32,
 }
 impl Stats {
