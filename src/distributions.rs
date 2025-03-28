@@ -5,17 +5,17 @@ use rand_pcg::Pcg64;
 
 pub type LogLikelihood = f64;
 
-pub trait Distribution<A> {
+pub trait Sampleable<A> {
     fn log_density(&self, x: &A) -> LogLikelihood;
     fn sample(&self, g: &mut Pcg64) -> (A, LogLikelihood);
 }
-impl<A> Debug for dyn Distribution<A> {
+impl<A> Debug for dyn Sampleable<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Distribution<{:?}>", std::any::type_name::<A>())
     }
 }
 
-pub trait ReDistribution<A>: Distribution<A> {
+pub trait Resampleable<A>: Sampleable<A> {
     fn resample(
         &self,
         old_value: A,
@@ -25,20 +25,24 @@ pub trait ReDistribution<A>: Distribution<A> {
         let s @ (_, ll) = self.sample(g);
         (s, ll - old_ll)
     }
+    fn resampleable(&self) -> bool {
+        true
+    }
 }
-impl<A> Debug for dyn ReDistribution<A> {
+impl<A> Debug for dyn Resampleable<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ReDistribution<{:?}>", std::any::type_name::<A>())
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Dirac<A: PartialEq + Clone>(A);
 impl<A: PartialEq + Clone> Dirac<A> {
     pub fn new(a: A) -> Self {
         Self(a)
     }
 }
-impl<A: PartialEq + Clone> Distribution<A> for Dirac<A> {
+impl<A: PartialEq + Clone> Sampleable<A> for Dirac<A> {
     fn sample(&self, _: &mut Pcg64) -> (A, LogLikelihood) {
         (self.0.clone(), 0.0)
     }
@@ -47,6 +51,7 @@ impl<A: PartialEq + Clone> Distribution<A> for Dirac<A> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Bernoulli {
     p: f64,
     ll1: LogLikelihood,
@@ -59,7 +64,7 @@ impl Bernoulli {
         Self { p, ll1, ll0 }
     }
 }
-impl Distribution<bool> for Bernoulli {
+impl Sampleable<bool> for Bernoulli {
     fn sample(&self, g: &mut Pcg64) -> (bool, LogLikelihood) {
         let x = g.random_bool(self.p);
         if x {
@@ -72,8 +77,9 @@ impl Distribution<bool> for Bernoulli {
         if *x { self.ll1 } else { self.ll0 }
     }
 }
-impl ReDistribution<bool> for Bernoulli {}
+impl Resampleable<bool> for Bernoulli {}
 
+#[derive(Clone, Debug)]
 pub struct Uniformly<A: Clone> {
     list: Vec<A>,
     ll: LogLikelihood,
@@ -84,7 +90,7 @@ impl<A: Clone> Uniformly<A> {
         Self { list, ll }
     }
 }
-impl<A: Clone> Distribution<A> for Uniformly<A> {
+impl<A: Clone> Sampleable<A> for Uniformly<A> {
     fn sample(&self, g: &mut Pcg64) -> (A, LogLikelihood) {
         let i = g.random_range(0..self.list.len());
         (self.list[i].clone(), self.ll)
@@ -93,8 +99,9 @@ impl<A: Clone> Distribution<A> for Uniformly<A> {
         self.ll
     }
 }
-impl<A: Clone> ReDistribution<A> for Uniformly<A> {}
+impl<A: Clone> Resampleable<A> for Uniformly<A> {}
 
+#[derive(Clone, Debug)]
 pub struct Categorical<A: Clone + PartialEq>(Vec<(A, f64)>);
 impl<A: Clone + PartialEq> Categorical<A> {
     pub fn new(list: Vec<(A, f64)>) -> Self {
@@ -103,7 +110,7 @@ impl<A: Clone + PartialEq> Categorical<A> {
         Self(norm_list)
     }
 }
-impl<A: Clone + PartialEq> Distribution<A> for Categorical<A> {
+impl<A: Clone + PartialEq> Sampleable<A> for Categorical<A> {
     fn sample(&self, g: &mut Pcg64) -> (A, LogLikelihood) {
         let mut r = g.random::<f64>();
         for (a, p) in &self.0 {
@@ -122,8 +129,9 @@ impl<A: Clone + PartialEq> Distribution<A> for Categorical<A> {
         }
     }
 }
-impl<A: Clone + PartialEq> ReDistribution<A> for Categorical<A> {}
+impl<A: Clone + PartialEq> Resampleable<A> for Categorical<A> {}
 
+#[derive(Clone, Debug)]
 pub struct Uniform {
     lower: f64,
     upper: f64,
@@ -139,7 +147,7 @@ impl Uniform {
         }
     }
 }
-impl Distribution<f64> for Uniform {
+impl Sampleable<f64> for Uniform {
     fn sample(&self, g: &mut Pcg64) -> (f64, LogLikelihood) {
         let x = g.random_range(self.lower..self.upper);
         (x, self.range_ll)
@@ -152,4 +160,4 @@ impl Distribution<f64> for Uniform {
         }
     }
 }
-impl ReDistribution<f64> for Uniform {}
+impl Resampleable<f64> for Uniform {}
